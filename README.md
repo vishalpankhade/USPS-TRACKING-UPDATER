@@ -4,7 +4,7 @@ A Chrome extension that turns repetitive USPS tracking checks into a faster dash
 
 > **Not affiliated with or endorsed by the United States Postal Service.**
 
-[**⬇️ Download Latest Extension**](https://github.com/YOUR-USERNAME/YOUR-REPO/releases/latest/download/usps-bulk-tracker-v2.5.0.zip) · [Releases](https://github.com/YOUR-USERNAME/YOUR-REPO/releases) · [Report a bug](../../issues)
+[**⬇️ Download Latest Extension**](https://github.com/vishalpankhade/USPS-TRACKING-UPDATER/releases/latest/download/usps-bulk-tracker-v2.5.0.zip) · [Releases](https://github.com/vishalpankhade/USPS-TRACKING-UPDATER/releases) · [Report a bug](../../issues)
 
 ## What it does
 
