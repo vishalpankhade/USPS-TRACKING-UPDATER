@@ -26,3 +26,8 @@ Check that:
 Make sure you selected the folder that directly contains `manifest.json` when using **Load unpacked**.
 
 On a company-managed computer, your organization may restrict developer-mode extensions. Contact your administrator if Chrome blocks installation.
+
+
+### Google Sheets returns HTTP 403 or HTML
+
+This usually means the Apps Script deployment requires Google login. v2.6.0 attempts a browser-login fallback automatically. Sign in to Google in the same Chrome profile and make sure the signed-in account can access the spreadsheet. If anonymous access is required but unavailable in your Workspace, an administrator may be enforcing that restriction.

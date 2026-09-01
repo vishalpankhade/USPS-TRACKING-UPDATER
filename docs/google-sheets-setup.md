@@ -1,50 +1,42 @@
 # Google Sheets setup
 
-The Google Sheets integration uses a Google Apps Script web app that you own. No paid tracking API is required.
+## 1. Add the Apps Script
 
-## 1. Open Apps Script
+Open the target Google Sheet → **Extensions → Apps Script**. Paste `extension/google-apps-script.gs`, change `SECRET`, and save.
 
-Open your Google Sheet → **Extensions → Apps Script**.
+## 2. Deploy the Web App
 
-Open `extension/google-apps-script.gs` from this repository and paste its contents into the Apps Script editor.
-
-## 2. Set a private bridge secret
-
-Change the placeholder secret in Apps Script to a random value. Use the same value in the extension's **Bridge secret** field.
-
-Never commit your real secret to GitHub.
-
-## 3. Deploy
-
-In Apps Script:
-
-**Deploy → New deployment → Web app**
-
-Use:
+Go to **Deploy → New deployment → Web app**. Use:
 
 - **Execute as:** Me
-- **Who has access:** Anyone
+- **Who has access:** `Anyone` is the simplest option when your Workspace allows it.
+- If your Workspace only offers **Anyone with Google account**, the extension can work after the Web App is opened once in the same Chrome profile and Google authorization is completed.
 
-Authorize the project when Google asks.
+Use the deployed URL ending in **`/exec`** in the extension. Do not use `/dev` for the production extension; `/dev` is the development/test deployment.
 
-Copy the resulting Web App URL ending in `/exec`.
-
-## 4. Configure the extension
+## 3. Configure the extension
 
 Enter:
 
-- **Google Sheet URL:** the spreadsheet you want to update
-- **Apps Script Web App URL:** the `/exec` URL from the deployment
-- **Sheet tab name:** optional; leave blank to use the first tab
-- **Tracking column:** optional; leave blank for automatic detection
-- **Bridge secret:** the same secret used in Apps Script
+- Google Sheet URL
+- Apps Script Web App URL ending in `/exec`
+- Sheet tab name (optional)
+- Tracking column (optional, e.g. `D`)
+- The same Bridge secret used in Apps Script
 
-Save the settings.
+Click **Save settings**.
 
-## 5. Run
+If Google returns HTTP 403 or an HTML authorization page, click **Open Apps Script Web App**, sign in/authorize the Web App, return to the dashboard, and try the action again. If your Workspace permits anonymous Web Apps, `Anyone` is the most reliable deployment for direct extension requests.
 
-Use **Fetch from Google Sheet & Check USPS**.
+## 4. What sync writes
 
-The extension reads the tracking numbers, checks USPS in batches of up to 35, and can update the matching rows as results arrive when automatic sync is enabled.
+The bridge creates/reuses:
 
-The sync writes a short USPS status and a clickable USPS tracking link. It does not write the full USPS page text into the status column.
+- `USPS Status`
+- `USPS Link`
+
+Rows are matched using normalized tracking numbers. Spaces, hyphens, quotation marks, and long IMpb-style numeric formats are supported.
+
+## 5. Long tracking numbers in Sheets
+
+For best results, format the tracking-number column as **Plain text** before pasting very long identifiers. The bridge also reads displayed cell text to preserve what the sheet shows.

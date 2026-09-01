@@ -1,29 +1,39 @@
 const USPS_BASE = 'https://tools.usps.com/tracking/';
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 let stopRequested = false;
-// Keep the v2.4 flow: one automatic retry of the same batch, with the same 30s wait.
-// Failed batches are retained separately so the user can retry them manually after the run.
+// Keep the fast v2.4-style flow: a normal ~30s result window, then one automatic retry.
+// A failed batch is retained separately for manual retry after the run.
 const AUTO_RETRIES = 1;
 let failedBatches = [];
+const bridgeRequests = new Map();
 
-function batchKey(numbers) {
-  return numbers.join('|');
-}
+function batchKey(numbers) { return numbers.join('|'); }
 
-chrome.runtime.onMessage.addListener((msg) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'start') {
     stopRequested = false;
-    run(msg.trackingNumbers, false).catch(e => finishError(e));
+    run(msg.trackingNumbers || [], false, true, 0).catch(e => finishError(e));
+  }
+  if (msg.type === 'resume') {
+    stopRequested = false;
+    resumeJob().catch(e => finishError(e));
   }
   if (msg.type === 'retry') {
     stopRequested = false;
-    retryResults(msg.trackingNumbers || []).catch(e => finishError(e));
+    retryResults(msg.trackingNumbers || [], !!msg.trackBatchFailures).catch(e => finishError(e));
   }
   if (msg.type === 'retryFailedBatches') {
     stopRequested = false;
     retryFailedBatches(msg.batches || []).catch(e => finishError(e));
   }
   if (msg.type === 'stop') stopRequested = true;
+
+  if (msg.type === 'bridgeRequest') {
+    requestBridgeViaTab(msg.bridgeUrl, msg.payload)
+      .then(result => sendResponse({ ok: true, result }))
+      .catch(error => sendResponse({ ok: false, error: error.message || String(error) }));
+    return true;
+  }
 });
 
 async function save(job, results) {
@@ -42,33 +52,49 @@ function dedupe(nums) {
   });
 }
 
-async function run(input, preserveExisting, trackBatchFailures = true) {
+async function resumeJob() {
+  const stored = await chrome.storage.local.get(['job', 'results']);
+  const job = stored.job;
+  if (!job?.paused || !Array.isArray(job.trackingNumbers) || !job.trackingNumbers.length) return;
+  await run(job.trackingNumbers, true, true, Number(job.completed || 0), true);
+}
+
+async function run(input, preserveExisting, trackBatchFailures = true, startAt = 0, isResume = false) {
   const numbers = dedupe(input || []);
   const stored = await chrome.storage.local.get(['results', 'job']);
   const existing = preserveExisting ? (stored.results || []) : [];
   let results = preserveExisting ? existing.slice() : [];
-  if (!preserveExisting) {
+
+  if (!preserveExisting && !isResume) {
     failedBatches = [];
   } else if (!failedBatches.length && Array.isArray(stored.job?.failedBatches)) {
     failedBatches = stored.job.failedBatches.slice();
   }
 
+  const total = numbers.length;
+  const initialCompleted = Math.min(Number(startAt) || 0, total);
   let job = {
-    total: numbers.length,
-    completed: 0,
-    message: preserveExisting ? 'Retrying needs review…' : 'Starting…',
-    detail: preserveExisting ? `Retrying ${numbers.length.toLocaleString()} result(s).` : '',
-    done: false
+    total,
+    completed: initialCompleted,
+    trackingNumbers: numbers.slice(),
+    paused: false,
+    done: false,
+    message: isResume ? 'Resuming…' : (preserveExisting ? 'Retrying…' : 'Starting…'),
+    detail: isResume
+      ? `Resuming from ${initialCompleted.toLocaleString()} of ${total.toLocaleString()} tracking number(s).`
+      : (preserveExisting ? `Rechecking ${total.toLocaleString()} result(s).` : '')
   };
   await save(job, results);
 
-  for (let start = 0; start < numbers.length; start += 35) {
+  for (let start = initialCompleted; start < numbers.length; start += 35) {
     if (stopRequested) {
-      job.done = true;
-      job.message = 'Stopped';
-      job.detail = `Stopped after ${job.completed.toLocaleString()} of ${numbers.length.toLocaleString()} result(s).`;
+      job.completed = start;
+      job.paused = true;
+      job.done = false;
+      job.message = 'Paused';
+      job.detail = `Paused after ${job.completed.toLocaleString()} of ${numbers.length.toLocaleString()} tracking number(s). Click Resume to continue.`;
       await save(job, results);
-      chrome.runtime.sendMessage({ type: 'done', job }).catch(() => {});
+      chrome.runtime.sendMessage({ type: 'paused', job }).catch(() => {});
       return;
     }
 
@@ -79,8 +105,8 @@ async function run(input, preserveExisting, trackBatchFailures = true) {
 
     for (let attempt = 0; attempt <= AUTO_RETRIES; attempt++) {
       try {
-        job.message = `${preserveExisting ? 'Retrying' : 'Checking'} batch ${batchNo}…`;
-        job.detail = `Batch ${batchNo}: ${batch.length} tracking number(s).${attempt ? ' Automatic retry in progress.' : ''}`;
+        job.message = `${isResume ? 'Resuming' : (preserveExisting ? 'Rechecking' : 'Checking')} batch ${batchNo}…`;
+        job.detail = `Batch ${batchNo}: ${batch.length} tracking number(s).${attempt ? ' One automatic retry is in progress.' : ''}`;
         await save(job, results);
         parsed = await fetchBatch(batch);
         lastError = null;
@@ -89,9 +115,9 @@ async function run(input, preserveExisting, trackBatchFailures = true) {
         lastError = e;
         if (attempt < AUTO_RETRIES) {
           job.message = `Batch ${batchNo} failed — retrying…`;
-          job.detail = `${e.message} USPS sometimes fails to load; the same batch will be reopened automatically once.`;
+          job.detail = `${e.message} The same batch will be reopened once.`;
           await save(job, results);
-          await sleep(1400);
+          await sleep(1200);
         }
       }
     }
@@ -109,8 +135,6 @@ async function run(input, preserveExisting, trackBatchFailures = true) {
         if (idx >= 0) failedBatches[idx] = failure;
         else failedBatches.push(failure);
 
-        // A failed page load is NOT the same thing as an unknown USPS status.
-        // Keep it in the dedicated Not Loaded state so Needs Review remains a true parser/recognition fallback.
         parsed = batch.map(tracking => ({
           tracking,
           category: 'not_loaded',
@@ -118,7 +142,6 @@ async function run(input, preserveExisting, trackBatchFailures = true) {
           shortStatus: 'Not Loaded'
         }));
       } else {
-        // When retrying a Needs Review item, keep it in Needs Review if the retry itself fails.
         parsed = batch.map(tracking => ({
           tracking,
           category: 'error',
@@ -127,45 +150,52 @@ async function run(input, preserveExisting, trackBatchFailures = true) {
         }));
       }
     } else if (trackBatchFailures) {
-      // A successful retry clears this exact failed batch from the retry queue.
-      failedBatches = failedBatches.filter(x => x.key !== key);
+      const successfulSet = new Set(batch);
+      failedBatches = failedBatches.filter(x => !(x.trackingNumbers || []).some(n => successfulSet.has(n)));
     }
 
-    if (preserveExisting) {
-      results = replaceByTracking(results, parsed);
-    } else {
-      results.push(...parsed);
-    }
+    results = preserveExisting ? replaceByTracking(results, parsed) : results.concat(parsed);
 
     job.completed = Math.min(start + batch.length, numbers.length);
-    const readable = parsed.filter(x => x.category !== 'error').length;
-    job.message = lastError ? `Batch ${batchNo} needs review` : `${preserveExisting ? 'Retried' : 'Completed'} batch ${batchNo}`;
+    job.message = lastError ? `Batch ${batchNo} not loaded` : `${isResume ? 'Resumed' : (preserveExisting ? 'Rechecked' : 'Completed')} batch ${batchNo}`;
     job.detail = lastError
-      ? `The batch failed after the automatic retry. ${parsed.length} tracking number(s) were kept in Not Loaded so you can retry the batch later.`
-      : `Received ${readable} readable USPS result(s).`;
+      ? `The batch failed after the automatic retry. It was moved to Not Loaded so you can retry it later.`
+      : `Received ${parsed.filter(x => x.category !== 'error').length.toLocaleString()} readable USPS result(s).`;
     await save(job, results);
 
-    if (start + 35 < numbers.length) await sleep(900);
+    if (stopRequested) {
+      job.paused = true;
+      job.done = false;
+      job.message = 'Paused';
+      job.detail = `Paused after ${job.completed.toLocaleString()} of ${numbers.length.toLocaleString()} tracking number(s). Click Resume to continue.`;
+      await save(job, results);
+      chrome.runtime.sendMessage({ type: 'paused', job }).catch(() => {});
+      return;
+    }
+
+    if (start + 35 < numbers.length) await sleep(800);
   }
 
+  job.completed = numbers.length;
+  job.paused = false;
   job.done = true;
-  job.message = preserveExisting ? 'Retry finished' : 'Finished';
-  job.detail = `${preserveExisting ? 'Retried' : 'Checked'} ${numbers.length.toLocaleString()} tracking number(s).`;
+  job.message = preserveExisting ? 'Recheck finished' : 'Finished';
+  job.detail = `${isResume ? 'Resumed and checked' : (preserveExisting ? 'Rechecked' : 'Checked')} ${numbers.length.toLocaleString()} tracking number(s).`;
   await save(job, results);
   chrome.runtime.sendMessage({ type: 'done', job }).catch(() => {});
 }
 
-async function retryResults(numbers) {
+async function retryResults(numbers, trackBatchFailures = false) {
   const clean = dedupe(numbers || []);
   if (!clean.length) return;
-  await run(clean, true, false);
+  await run(clean, true, trackBatchFailures, 0, false);
 }
 
 async function retryFailedBatches(batches) {
   const cleanBatches = (batches || []).filter(b => Array.isArray(b?.trackingNumbers) && b.trackingNumbers.length);
   if (!cleanBatches.length) return;
   const numbers = cleanBatches.flatMap(b => b.trackingNumbers);
-  await run(numbers, true, true);
+  await run(numbers, true, true, 0, false);
 }
 
 function replaceByTracking(existing, replacements) {
@@ -177,12 +207,12 @@ function replaceByTracking(existing, replacements) {
 }
 
 async function fetchBatch(batch) {
-  // USPS's current multi-tracking route uses the tracking numbers directly in the path.
-  // Keep commas unescaped, matching the URL generated by the current USPS website.
   const url = `${USPS_BASE}${batch.join(',')}`;
   let tabId = null;
   try {
-    const tab = await chrome.tabs.create({ url, active: true });
+    // Keep the dashboard in focus. USPS processing happens in an inactive background tab.
+    // The page can still load and be inspected by the extension without stealing focus.
+    const tab = await chrome.tabs.create({ url, active: false });
     tabId = tab.id;
     const extracted = await waitForExtraction(tabId, batch);
     return parseBatch(batch, extracted.text || '');
@@ -200,23 +230,17 @@ async function waitForExtraction(tabId, batch) {
     try {
       const r = await chrome.scripting.executeScript({
         target: { tabId },
-        func: () => ({
-          text: document.body?.innerText || '',
-          ready: document.readyState,
-          url: location.href
-        })
+        func: () => ({ text: document.body?.innerText || '', ready: document.readyState, url: location.href })
       });
       const x = r?.[0]?.result || {};
       last = x.text || '';
 
-      if (/access denied/i.test(last)) {
-        throw new Error('USPS returned Access Denied for this batch.');
-      }
+      if (/access denied/i.test(last)) throw new Error('USPS returned Access Denied for this batch.');
       if (/technical difficulties/i.test(last) && !batch.some(n => last.includes(n))) {
         throw new Error('USPS reported technical difficulties on the tracking page.');
       }
       if (batch.some(n => last.includes(n))) {
-        await sleep(3000);
+        await sleep(2500);
         const r2 = await chrome.scripting.executeScript({
           target: { tabId },
           func: () => ({ text: document.body?.innerText || '', ready: document.readyState, url: location.href })
@@ -228,127 +252,84 @@ async function waitForExtraction(tabId, batch) {
     }
     await sleep(1000);
   }
-
   if (/access denied/i.test(last)) throw new Error('USPS returned Access Denied for this batch.');
   throw new Error('Timed out waiting for USPS results.');
 }
 
-function oneLine(s) {
-  return String(s || '').replace(/\s+/g, ' ').trim();
-}
-
-function normalizeForCompare(s) {
-  return oneLine(s).toLowerCase().replace(/[®™]/g, '');
-}
+function oneLine(s) { return String(s || '').replace(/\s+/g, ' ').trim(); }
+function normalizeForCompare(s) { return oneLine(s).toLowerCase().replace(/[®™]/g, ''); }
 
 function categoryFor(text) {
   const t = oneLine(text);
   if (/technical difficulties|access denied|timed out/i.test(t)) return 'error';
   if (/tracking not available|tracking information is currently unavailable|no tracking information/i.test(t)) return 'not_available';
-  if (/label created,?\s*usps awaiting item|usps awaiting item|pre-shipment/i.test(t)) return 'awaiting';
-  if (/\balert\b/i.test(t)) return 'alert';
-  if (/\bdelivered\b/i.test(t) && !/delivery attempt|attempted delivery|not delivered/i.test(t)) return 'delivered';
-  if (/in transit|moving through network|arriving late|out for delivery|delivery attempted|delivery exception|delivery interrupted|awaiting delivery scan|available for pickup|held at post office|forwarded|missent|notice left|redelivery|processing at usps facility|departed usps facility|arrived at usps facility|insufficient address|no access to delivery location|pickup notice|scheduled delivery/i.test(t)) return 'pending';
+  if (/label created,?\s*usps awaiting item|pre-shipment/i.test(t)) return 'awaiting';
+  if (/alert\s*:/i.test(t)) return 'alert';
+  if (/delivered\b/i.test(t)) return 'delivered';
+  if (/out for delivery|arriving late|in transit|moving through network|delivery attempted|delivery exception|delivery interrupted|available for pickup|held at post office|forwarded|missent|insufficient address|no access/i.test(t)) return 'pending';
   return 'error';
 }
 
-const BOILERPLATE = [
-  /^copy$/i,
-  /^add to informed delivery$/i,
-  /^copy add to informed delivery$/i,
-  /^usps tracking plus®?$/i,
-  /^sign up for informed delivery$/i,
-  /^feedback$/i,
-  /^faqs?$/i,
-  /^usps\.com$/i,
-  /^track packages$/i,
-  /^tracking$/i
-];
+function shortStatusFrom(cat, status) {
+  if (cat === 'delivered') return 'Delivered';
+  if (cat === 'alert') return 'Alert';
+  if (cat === 'awaiting') return 'Awaiting USPS';
+  if (cat === 'not_available') return 'Tracking Not Available';
+  if (cat === 'not_loaded') return 'Not Loaded';
+  if (cat === 'pending') return 'Not Delivered';
+  return 'Needs Review';
+}
 
 function cleanSectionLines(section, tracking) {
-  const tn = normalizeForCompare(tracking);
-  const lines = section.split('\n').map(oneLine).filter(Boolean);
-  const out = [];
-  for (const line of lines) {
-    if (normalizeForCompare(line) === tn) continue;
-    if (BOILERPLATE.some(re => re.test(line))) continue;
-    if (/^\d{1,3}(?:,\d{3})*\s*(?:of|results?)$/i.test(line)) continue;
-    if (out.length && normalizeForCompare(out[out.length - 1]) === normalizeForCompare(line)) continue;
-    out.push(line);
-  }
-  return out;
+  const raw = String(section || '').replace(/\r/g, '').split('\n').map(oneLine).filter(Boolean);
+  const skipExact = new Set([
+    tracking.toLowerCase(), 'copy', 'copy add to informed delivery', 'add to informed delivery',
+    'get more out of usps tracking:', 'usps tracking plus®', 'usps tracking plus',
+    'latest update', 'track another package'
+  ]);
+  return raw.filter(line => {
+    const n = normalizeForCompare(line);
+    if (skipExact.has(n)) return false;
+    if (/^copy\b/i.test(line)) return false;
+    if (/^add to informed delivery$/i.test(line)) return false;
+    return true;
+  });
 }
 
-function extractLatestAndDetails(lines, category) {
-  const latestIdx = lines.findIndex(x => /^latest update$/i.test(x));
-  const plusIdx = lines.findIndex(x => /^get more out of usps tracking:?$/i.test(x));
-  let latest = '';
-  if (latestIdx >= 0) {
-    const end = plusIdx > latestIdx ? plusIdx : Math.min(lines.length, latestIdx + 5);
-    const candidates = lines.slice(latestIdx + 1, end).filter(x => !BOILERPLATE.some(re => re.test(x)));
-    latest = candidates[0] || '';
+function extractLatestAndDetails(lines, cat) {
+  const filtered = lines.slice();
+  const statusLabels = [
+    'Delivered, In/At Mailbox', 'Delivered, To Original Sender', 'Delivered, In/At Front Door',
+    'Arriving Late', 'In Transit to Next Facility', 'Moving Through Network', 'Out for Delivery',
+    'Delivery Attempted', 'Delivery Interrupted', 'Label Created, USPS Awaiting Item',
+    'USPS Awaiting Item', 'Available for Pickup', 'Held at Post Office', 'Forwarded', 'Alert'
+  ];
+  let idx = -1;
+  for (let i = 0; i < filtered.length; i++) {
+    if (statusLabels.some(x => normalizeForCompare(filtered[i]).includes(normalizeForCompare(x)))) { idx = i; break; }
   }
-
-  const body = lines.filter(x => !/^latest update$/i.test(x) && !/^get more out of usps tracking:?$/i.test(x) && !/^usps tracking plus®?$/i.test(x));
-  let detail = '';
-  if (category === 'delivered') {
-    detail = body.find(x => /^delivered(?:,|$)/i.test(x)) || '';
-  } else if (category === 'alert') {
-    detail = body.find(x => /\balert\b/i.test(x)) || '';
-  } else if (category === 'awaiting') {
-    detail = body.find(x => /label created|usps awaiting item|pre-shipment/i.test(x)) || '';
-  } else if (category === 'not_available') {
-    detail = 'Tracking Not Available';
-  } else if (category === 'pending') {
-    const matches = [
-      /arriving late/i, /out for delivery/i, /delivery interrupted/i, /delivery attempted/i, /awaiting delivery scan/i,
-      /available for pickup/i, /held at post office/i, /in transit/i, /moving through network/i, /processing at usps facility/i,
-      /departed usps facility/i, /arrived at usps facility/i, /scheduled delivery/i
-    ];
-    detail = body.find(x => matches.some(re => re.test(x))) || '';
-  }
-
-  if (latest && detail && normalizeForCompare(latest) !== normalizeForCompare(detail)) return `${latest}\n${detail}`;
-  return latest || detail || lines.slice(0, 4).join('\n');
-}
-
-function shortStatusFrom(category, status) {
-  const t = oneLine(status);
-  if (category === 'delivered') return t.match(/Delivered,\s*[A-Za-z0-9 /'&-]+/i)?.[0]?.trim() || 'Delivered';
-  if (category === 'alert') return t.match(/Alert:?\s*[^.\n]+/i)?.[0]?.trim() || 'Alert';
-  if (category === 'awaiting') return t.match(/Label Created,?\s*[^.\n]+|USPS Awaiting Item|Pre-Shipment/i)?.[0]?.trim() || 'Awaiting USPS';
-  if (category === 'not_available') return 'Tracking Not Available';
-  if (category === 'not_loaded') return 'Not Loaded';
-  if (category === 'pending') {
-    const m = t.match(/Arriving Late|Out for Delivery|Delivery Interrupted|Delivery Attempted|Awaiting Delivery Scan|Available for Pickup|Held at Post Office|In Transit|Moving Through Network|Processing at USPS Facility|Departed USPS Facility|Arrived at USPS Facility|Scheduled Delivery/i);
-    return m ? m[0] : 'Not Delivered';
-  }
-  return 'Needs Review';
+  if (idx >= 0) return filtered.slice(idx, Math.min(idx + 3, filtered.length)).join(' — ');
+  if (filtered.length) return filtered.slice(0, 3).join(' — ');
+  if (cat === 'not_available') return 'Tracking Not Available';
+  if (cat === 'awaiting') return 'Label Created, USPS Awaiting Item';
+  return '';
 }
 
 function parseBatch(batch, text) {
   const clean = text.replace(/\r/g, '');
-  const positions = batch
-    .map(n => ({ n, i: clean.indexOf(n) }))
-    .filter(x => x.i >= 0)
-    .sort((a, b) => a.i - b.i);
-
+  const positions = batch.map(n => ({ n, i: clean.indexOf(n) })).filter(x => x.i >= 0).sort((a,b) => a.i - b.i);
   const out = [];
   for (const n of batch) {
     const p = positions.findIndex(x => x.n === n);
     if (p < 0) {
       const cat = categoryFor(clean);
-      const status = cat === 'not_available'
-        ? 'Tracking Not Available'
-        : /technical difficulties/i.test(clean)
-          ? 'USPS is currently reporting technical difficulties on the tracking application.'
-          : /Access Denied/i.test(clean)
-            ? 'USPS returned Access Denied for this batch.'
-            : 'No readable USPS result found for this tracking number.';
+      const status = cat === 'not_available' ? 'Tracking Not Available'
+        : /technical difficulties/i.test(clean) ? 'USPS is currently reporting technical difficulties on the tracking application.'
+        : /Access Denied/i.test(clean) ? 'USPS returned Access Denied for this batch.'
+        : 'No readable USPS result found for this tracking number.';
       out.push({ tracking: n, category: cat === 'error' ? 'error' : cat, status, shortStatus: shortStatusFrom(cat === 'error' ? 'error' : cat, status) });
       continue;
     }
-
     const start = positions[p].i;
     const end = p + 1 < positions.length ? positions[p + 1].i : Math.min(clean.length, start + 3500);
     const section = clean.slice(start, end);
@@ -356,21 +337,81 @@ function parseBatch(batch, text) {
     const lines = cleanSectionLines(section, n);
     const status = extractLatestAndDetails(lines, cat) || 'USPS result loaded, but no readable status text was detected.';
     const finalCat = cat || 'error';
-    out.push({
-      tracking: n,
-      category: finalCat,
-      status,
-      shortStatus: shortStatusFrom(finalCat, status)
-    });
+    out.push({ tracking: n, category: finalCat, status, shortStatus: shortStatusFrom(finalCat, status) });
   }
   return out;
 }
 
+function parseJsonText(text) {
+  const raw = String(text || '').trim();
+  try { return JSON.parse(raw); } catch {}
+  return null;
+}
+
+async function requestBridgeViaTab(bridgeUrl, payload) {
+  if (!bridgeUrl) throw new Error('Apps Script Web App URL is missing.');
+  const requestId = `bridge_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  await chrome.storage.local.set({ [`bridgePayload:${requestId}`]: { bridgeUrl, payload } });
+  return new Promise(async (resolve, reject) => {
+    const timer = setTimeout(async () => {
+      const state = bridgeRequests.get(requestId);
+      if (!state) return;
+      bridgeRequests.delete(requestId);
+      try { await chrome.storage.local.remove(`bridgePayload:${requestId}`); } catch {}
+      try { if (state.tabId) await chrome.tabs.remove(state.tabId); } catch {}
+      reject(new Error('Timed out waiting for Google Apps Script. Make sure you are signed in to Google in Chrome and can open the Web App URL.'));
+    }, 60000);
+    bridgeRequests.set(requestId, { resolve: value => { clearTimeout(timer); resolve(value); }, reject: error => { clearTimeout(timer); reject(error); }, bridgeUrl, tabId: null, createdAt: Date.now() });
+    try {
+      const tab = await chrome.tabs.create({ url: chrome.runtime.getURL(`bridge.html?requestId=${encodeURIComponent(requestId)}`), active: false });
+      bridgeRequests.get(requestId).tabId = tab.id;
+    } catch (e) {
+      clearTimeout(timer);
+      bridgeRequests.delete(requestId);
+      try { await chrome.storage.local.remove(`bridgePayload:${requestId}`); } catch {}
+      reject(e);
+    }
+  });
+}
+
+chrome.tabs.onUpdated.addListener(async (tabId, info) => {
+  if (info.status !== 'complete') return;
+  const entry = [...bridgeRequests.entries()].find(([, v]) => v.tabId === tabId);
+  if (!entry) return;
+  const [requestId, state] = entry;
+  // Ignore the initial bridge.html page; wait for navigation to the Google web app.
+  if (state.bridgeUrl.startsWith('http') && state.tabId === tabId) {
+    try {
+      const r = await chrome.scripting.executeScript({ target: { tabId }, func: () => document.body?.innerText || '' });
+      const text = r?.[0]?.result || '';
+      const parsed = parseJsonText(text);
+      if (parsed) return finishBridge(requestId, parsed);
+      if (/accounts\.google\.com|signin|sign in|permission|authorize/i.test(text) || /accounts\.google\.com/i.test((await chrome.tabs.get(tabId)).url || '')) {
+        return finishBridge(requestId, { ok: false, error: 'Google requires you to sign in/authorize the Apps Script web app in the browser. Open the Web App URL once in Chrome, complete authorization, then run the Google Sheets action again.' });
+      }
+      if (/access denied|forbidden|403/i.test(text)) return finishBridge(requestId, { ok: false, error: 'Apps Script returned an access error. For a direct extension request, the deployment must allow anonymous access. If your Workspace does not allow anonymous web apps, keep the deployment restricted and let the extension use the browser-login fallback.' });
+    } catch (e) {
+      // Continue waiting a little longer for the final redirect/render.
+      state.lastError = e.message;
+    }
+  }
+});
+
+async function finishBridge(requestId, result) {
+  const state = bridgeRequests.get(requestId);
+  if (!state) return;
+  bridgeRequests.delete(requestId);
+  try { await chrome.storage.local.remove(`bridgePayload:${requestId}`); } catch {}
+  try { await chrome.tabs.remove(state.tabId); } catch {}
+  state.resolve(result);
+}
+
 async function finishError(e) {
   const data = await chrome.storage.local.get(['job', 'results']);
-  const job = data.job || { total: 0, completed: 0 };
+  const job = data.job || { total: 0, completed: 0, trackingNumbers: [] };
+  job.paused = false;
+  job.done = true;
   job.message = 'Stopped';
   job.detail = e.message || String(e);
-  job.done = true;
   await save(job, data.results || []);
 }

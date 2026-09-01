@@ -4,9 +4,14 @@
 
 const SECRET = 'CHANGE_THIS_TO_A_SECRET';
 
+function doGet(e) {
+  return json({ ok: true, service: 'USPS Bulk Tracker Google Sheets Bridge', message: 'Web app is reachable.' });
+}
+
 function doPost(e) {
   try {
-    const payload = JSON.parse(e.postData && e.postData.contents ? e.postData.contents : '{}');
+    const raw = e.postData && e.postData.contents ? e.postData.contents : (e.parameter && e.parameter.payload ? e.parameter.payload : '{}');
+    const payload = JSON.parse(raw);
     if (payload.secret !== SECRET) return json({ ok: false, error: 'Unauthorized: secret does not match.' });
 
     const action = String(payload.action || 'sync').toLowerCase();
@@ -60,7 +65,7 @@ function resolveSheet(ss, requestedName) {
 }
 
 function readTrackings(sheet, trackingColumnLetter) {
-  const data = sheet.getDataRange().getValues();
+  const data = sheet.getDataRange().getDisplayValues();
   const headerRow = findHeaderRow(data);
   const headers = data[headerRow - 1] || [];
   const trackingCol = trackingColumnLetter
@@ -89,7 +94,7 @@ function syncResults(sheet, payload) {
   const results = Array.isArray(payload.results) ? payload.results : [];
   if (!results.length) return json({ ok: true, updated: 0, message: 'No results to sync.' });
 
-  const data = sheet.getDataRange().getValues();
+  const data = sheet.getDataRange().getDisplayValues();
   const headerRow = findHeaderRow(data);
   const headers = data[headerRow - 1] || [];
   const trackingColumnLetter = String(payload.trackingColumn || '').trim();
@@ -102,7 +107,7 @@ function syncResults(sheet, payload) {
   }
 
   const outputCols = ensureOutputColumns(sheet, headerRow, trackingCol, headers);
-  const values = sheet.getDataRange().getValues();
+  const values = sheet.getDataRange().getDisplayValues();
   const rowMap = new Map();
   for (let r = headerRow; r < values.length; r++) {
     const normalized = normalizeTracking(values[r][trackingCol - 1]);

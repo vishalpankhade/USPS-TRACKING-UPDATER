@@ -1,13 +1,23 @@
 # Changelog
 
-## 2.5.0
+## v2.7.1
 
-- Kept the v2.4 normal 30-second USPS result wait.
-- Kept one automatic retry for a failed batch instead of adding a longer 45-second wait or multiple automatic retries.
-- Added a dedicated **Not Loaded** state for batches where the USPS page could not be read after the automatic retry.
-- Added a **Not Loaded batches** recovery section with retry-one and retry-all actions.
-- Kept **Needs Review** as the safety-net category for unknown/unrecognized USPS results.
-- Added individual retry actions for Not Loaded and Needs Review results.
-- Kept the current USPS multi-tracking URL format.
-- Updated the dashboard primary blue to `#88a5ed` with dark primary text.
-- Kept clickable summary cards and Google Sheets sync.
+- Keeps USPS batch-processing tabs in the background so the dashboard stays focused.
+- USPS batch result pages no longer steal browser focus while a check is running.
+- Existing v2.7.0 features and Google Sheets workflow remain unchanged.
+
+## v2.7.0
+
+- Added a polished, persistent light/dark mode for the full dashboard.
+- Added tracking-format filters, including **IMpb / Long**.
+- Tracking input now accepts USPS package identifiers up to 34 digits, including IMpb-style formats.
+- Cleans surrounding quotes, spaces, and hyphens before checking.
+- Keeps the existing fast v2.4-style batch flow: one normal attempt plus one automatic retry, then a separate Not Loaded queue.
+- Keeps Recheck non-delivered, Needs Review retry, and Stop/Resume behavior.
+- Google Sheets reader now uses displayed cell text so long tracking numbers and formatting are preserved.
+- Google Sheets setup messaging now clearly distinguishes `/exec` (production) from `/dev` (development).
+- Added an Open Apps Script Web App button to make Workspace authorization/setup easier.
+
+## v2.6.0
+
+- Added non-delivered recheck workflow and Sheets browser-login fallback.

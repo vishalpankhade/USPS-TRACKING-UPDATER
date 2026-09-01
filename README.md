@@ -4,7 +4,7 @@ A Chrome extension that turns repetitive USPS tracking checks into a faster dash
 
 > **Not affiliated with or endorsed by the United States Postal Service.**
 
-[**⬇️ Download Latest Extension**](https://github.com/vishalpankhade/USPS-TRACKING-UPDATER/releases/latest/download/usps-bulk-tracker-v2.5.0.zip) · [Releases](https://github.com/vishalpankhade/USPS-TRACKING-UPDATER/releases) · [Report a bug](../../issues)
+[**⬇️ Download Latest Extension**](https://github.com/YOUR-USERNAME/YOUR-REPO/releases/latest/download/usps-bulk-tracker-v2.6.0.zip) · [Releases](https://github.com/YOUR-USERNAME/YOUR-REPO/releases) · [Report a bug](../../issues)
 
 ## What it does
 
@@ -20,7 +20,7 @@ Paste as many USPS tracking numbers as you have, or fetch them directly from Goo
 - **Not Loaded** — the USPS page for a whole batch failed to load/read after the normal automatic retry. These batches are kept in a separate retry queue.
 - **Needs Review** — the parser cannot confidently recognize the USPS response. This is intentionally a safety-net category.
 
-## Safe retry behavior in v2.5.0
+## Safe retry behavior in v2.6.0
 
 This release deliberately keeps the v2.4 timing flow rather than introducing a 45-second initial wait or several automatic retries.
 

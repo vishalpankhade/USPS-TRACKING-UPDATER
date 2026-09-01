@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "USPS Bulk Tracker Dashboard – Zero Cost",
-  "version": "2.5.0",
-  "description": "Track unlimited USPS tracking numbers through the official USPS tracking website with 35-number batches, one safe automatic retry, not-loaded batch recovery, and optional Google Sheets sync.",
+  "version": "2.7.1",
+  "description": "Track unlimited USPS tracking numbers through the official USPS tracking website with 35-number batches, one safe automatic retry, not-loaded batch recovery, Google Sheets compatibility, pause/resume, active recheck, format filtering, and optional Google Sheets sync.",
   "permissions": [
     "tabs",
     "storage",

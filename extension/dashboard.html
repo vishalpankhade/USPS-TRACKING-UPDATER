@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -12,9 +12,9 @@
     <div>
       <div class="eyebrow">ZERO-API-COST USPS WORKFLOW</div>
       <h1>USPS Bulk Tracker</h1>
-      <p>Paste as many USPS tracking numbers as you have. The extension handles USPS's 35-number batches automatically.</p>
+      <p>Paste as many USPS tracking numbers as you have. The extension handles USPS-compatible batches automatically.</p>
     </div>
-    <div class="top-actions"><button id="clearBtn" class="ghost" type="button">Clear</button></div>
+    <div class="top-actions"><button id="themeBtn" class="ghost" type="button">☾ Dark mode</button><button id="clearBtn" class="ghost" type="button">Clear</button></div>
   </header>
 
   <main>
@@ -22,10 +22,11 @@
       <label for="trackingInput">Tracking numbers</label>
       <textarea id="trackingInput" placeholder="Paste one per line, or paste a whole Google Sheets column…
 
-9400111899223856928493
-9405503699300000000000
-…"></textarea>
-      <div class="input-row"><span id="countLabel">0 tracking numbers</span><span>Duplicates are removed automatically</span></div>
+9200190344386501345841
+9400 1401 0624 6009 3740 24
+"9200190344386501345834"
+"></textarea>
+      <div class="input-row"><span id="countLabel">0 tracking numbers</span><span>Spaces, hyphens and quotation marks are cleaned automatically • duplicates removed</span></div>
       <div class="button-row"><button id="sheetCheckBtn" class="primary" type="button">Fetch from Google Sheet &amp; Check USPS</button><button id="startBtn" class="ghost" type="button">Check pasted numbers</button><button id="stopBtn" class="danger" type="button" disabled>Stop</button></div>
       <div class="auto-row"><label class="checkline"><input id="autoSync" type="checkbox"><span>Automatically update Google Sheet as USPS batches finish</span></label></div>
     </section>
@@ -39,7 +40,7 @@
     </section>
 
     <section id="failedBatchesPanel" class="panel failed-batches-panel hidden">
-      <div class="failed-head"><div><h2>USPS batches that did not load</h2><p>These batches failed after the normal automatic retry. They are kept separate from Needs Review so you can retry the whole batch later.</p></div><button id="retryFailedBatchesBtn" class="small warning-outline" type="button">Retry all not-loaded batches</button></div>
+      <div class="failed-head"><div><h2>USPS batches that did not load</h2><p>These batches failed after the normal one-time automatic retry. They stay separate so the main run can finish.</p></div><button id="retryFailedBatchesBtn" class="small warning-outline" type="button">Retry all not-loaded batches</button></div>
       <div class="failed-count-line"><strong id="failedBatchCount">0</strong> batch(es) waiting for retry</div>
       <div id="failedBatchesList" class="failed-list"></div>
     </section>
@@ -58,32 +59,33 @@
     <section class="toolbar panel">
       <div class="toolbar-left">
         <div class="filters" id="filters"></div>
+        <div class="format-filters" id="formatFilters" aria-label="Tracking format filters"></div>
         <div class="result-search"><input id="resultSearch" type="search" placeholder="Search tracking or status…"><span id="shownCount">0 shown</span></div>
       </div>
       <div class="toolbar-actions">
-        <button id="retryReviewBtn" class="small warning-outline hidden" type="button">Retry Needs Review</button>
+        <button id="recheckActiveBtn" class="small primary-outline hidden" type="button">Recheck non-delivered</button><button id="retryReviewBtn" class="small warning-outline hidden" type="button">Retry Needs Review</button>
         <button id="copyUndelivered" class="small primary-outline" type="button">Copy not delivered for Sheets</button>
         <button id="copyAll" class="small" type="button">Copy all for Sheets</button>
-        <button id="downloadCsv" class="small" type="button" style="display:none">Download CSV</button>
+        <button id="downloadCsv" class="small" type="button">Download CSV</button>
       </div>
     </section>
 
     <section class="panel sheet-card">
-      <div class="sheet-head"><div><h2>Google Sheets sync</h2><p>Optional: write Tracking → USPS Status → USPS Link directly into your sheet using a free Google Apps Script bridge.</p></div><div id="syncStatus" class="sync-status"></div></div>
+      <div class="sheet-head"><div><h2>Google Sheets sync</h2><p>Write Tracking → USPS Status → USPS Link directly into your sheet using a free Google Apps Script bridge.</p></div><div id="syncStatus" class="sync-status"></div></div>
       <div class="sheet-grid">
         <label>Google Sheet URL<input id="sheetUrl" placeholder="https://docs.google.com/spreadsheets/d/..." type="url"></label>
         <label>Apps Script Web App URL<input id="bridgeUrl" placeholder="https://script.google.com/macros/s/.../exec" type="url"></label>
         <label>Sheet tab name <span>(optional)</span><input id="sheetName" placeholder="Sheet1"></label>
-        <label>Tracking column <span>(optional, e.g. A)</span><input id="trackingColumn" placeholder="Auto-detect"></label>
+        <label>Tracking column <span>(optional, e.g. D)</span><input id="trackingColumn" placeholder="Auto-detect"></label>
         <label>Bridge secret<input id="sheetSecret" placeholder="The same secret used in Apps Script" type="password"></label>
       </div>
-      <div class="sheet-actions"><button id="saveSheetBtn" class="small" type="button">Save settings</button><button id="openSheetBtn" class="small" type="button">Open Google Sheet</button><button id="syncBtn" class="small primary sync-button" type="button">Sync results to Google Sheet</button></div>
-      <details class="setup-details"><summary>One-time Google Apps Script setup</summary><div class="setup-copy"><p>Open your Google Sheet → Extensions → Apps Script. The extension ZIP includes <code>google-apps-script.gs</code>. Paste that code, set the same secret in the script and here, then Deploy → New deployment → Web app → Execute as you → Who has access: Anyone. Copy the Web App URL into the field above.</p><p>The sync creates or reuses <strong>USPS Status</strong> and <strong>USPS Link</strong> columns and updates rows by matching your tracking number.</p></div></details>
+      <div class="sheet-actions"><button id="saveSheetBtn" class="small" type="button">Save settings</button><button id="openSheetBtn" class="small" type="button">Open Google Sheet</button><button id="openBridgeBtn" class="small" type="button">Open Apps Script Web App</button><button id="syncBtn" class="small primary sync-button" type="button">Sync results to Google Sheet</button></div>
+      <details class="setup-details"><summary>One-time Google Apps Script setup</summary><div class="setup-copy"><p><strong>Use the deployed <code>/exec</code> URL in the extension.</strong> The <code>/dev</code> URL is for development/testing and is not the production URL to distribute with the extension. Deploy the script as a Web app and execute it as you. If your Workspace allows anonymous web apps, <strong>Anyone</strong> is the simplest option. If your Workspace only allows <strong>Anyone with Google account</strong>, click <strong>Open Apps Script Web App</strong> once in the same Chrome profile, sign in/authorize it if Google asks, then return and try again.</p><p>The bridge creates/reuses <strong>USPS Status</strong> and <strong>USPS Link</strong> columns and matches rows using a normalized tracking number, including numbers with spaces, hyphens or quotes.</p></div></details>
     </section>
 
     <section id="results" class="results"></section>
   </main>
-  <footer>Uses the official USPS tracking website. No tracking API key is required.</footer>
+  <footer>Uses the official USPS tracking website. No USPS tracking API key is required.</footer>
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <script src="dashboard.js"></script>
