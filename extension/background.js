@@ -261,12 +261,16 @@ function normalizeForCompare(s) { return oneLine(s).toLowerCase().replace(/[®�
 
 function categoryFor(text) {
   const t = oneLine(text);
+
+  // If the USPS tracking detail itself contains the word Alert, treat it as an alert.
+  // USPS can format this as a colon, hyphen, em dash, or include extra wording such as
+  // "Alert — Missing Mail Search Request Notice".
+  if (/\balert\b/i.test(t)) return 'alert';
   if (/technical difficulties|access denied|timed out/i.test(t)) return 'error';
   if (/tracking not available|tracking information is currently unavailable|no tracking information/i.test(t)) return 'not_available';
-  if (/label created,?\s*usps awaiting item|pre-shipment/i.test(t)) return 'awaiting';
-  if (/alert\s*:/i.test(t)) return 'alert';
-  if (/delivered\b/i.test(t)) return 'delivered';
-  if (/out for delivery|arriving late|in transit|moving through network|delivery attempted|delivery exception|delivery interrupted|available for pickup|held at post office|forwarded|missent|insufficient address|no access/i.test(t)) return 'pending';
+  if (/label created[^.]{0,120}usps awaiting item|usps awaiting item|pre-shipment/i.test(t)) return 'awaiting';
+  if (/\bdelivered\b/i.test(t)) return 'delivered';
+  if (/out for delivery|arriving late|in transit|on the way|moving through network|delivery attempted|delivery exception|delivery interrupted|available for pickup|held at post office|forwarded|missent|insufficient address|no access to delivery location|usps is now in possession|accepted/i.test(t)) return 'pending';
   return 'error';
 }
 
@@ -302,7 +306,8 @@ function extractLatestAndDetails(lines, cat) {
     'Delivered, In/At Mailbox', 'Delivered, To Original Sender', 'Delivered, In/At Front Door',
     'Arriving Late', 'In Transit to Next Facility', 'Moving Through Network', 'Out for Delivery',
     'Delivery Attempted', 'Delivery Interrupted', 'Label Created, USPS Awaiting Item',
-    'USPS Awaiting Item', 'Available for Pickup', 'Held at Post Office', 'Forwarded', 'Alert'
+    'USPS Awaiting Item', 'Shipping Label Created', 'USPS in possession of item',
+    'Available for Pickup', 'Held at Post Office', 'Forwarded', 'Alert'
   ];
   let idx = -1;
   for (let i = 0; i < filtered.length; i++) {

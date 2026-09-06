@@ -27,7 +27,7 @@
 "9200190344386501345834"
 "></textarea>
       <div class="input-row"><span id="countLabel">0 tracking numbers</span><span>Spaces, hyphens and quotation marks are cleaned automatically • duplicates removed</span></div>
-      <div class="button-row"><button id="sheetCheckBtn" class="primary" type="button">Fetch from Google Sheet &amp; Check USPS</button><button id="startBtn" class="ghost" type="button">Check pasted numbers</button><button id="stopBtn" class="danger" type="button" disabled>Stop</button></div>
+      <div class="button-row"><button id="sheetCheckBtn" class="primary" type="button">Fetch from Google Sheet &amp; Check USPS</button><button id="startBtn" class="ghost" type="button">Check pasted numbers</button><button id="checkNewBtn" class="ghost hidden" type="button">Check newly pasted numbers (0)</button><button id="stopBtn" class="danger" type="button" disabled>Stop</button></div>
       <div class="auto-row"><label class="checkline"><input id="autoSync" type="checkbox"><span>Automatically update Google Sheet as USPS batches finish</span></label></div>
     </section>
 
@@ -63,7 +63,7 @@
         <div class="result-search"><input id="resultSearch" type="search" placeholder="Search tracking or status…"><span id="shownCount">0 shown</span></div>
       </div>
       <div class="toolbar-actions">
-        <button id="recheckActiveBtn" class="small primary-outline hidden" type="button">Recheck non-delivered</button><button id="retryReviewBtn" class="small warning-outline hidden" type="button">Retry Needs Review</button>
+        <button id="recheckActiveBtn" class="small primary-outline hidden" type="button">Recheck non-delivered</button><button id="retryCurrentBtn" class="small warning-outline hidden" type="button">Retry current section</button>
         <button id="copyUndelivered" class="small primary-outline" type="button">Copy not delivered for Sheets</button>
         <button id="copyAll" class="small" type="button">Copy all for Sheets</button>
         <button id="downloadCsv" class="small" type="button">Download CSV</button>

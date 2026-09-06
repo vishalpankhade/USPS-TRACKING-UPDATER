@@ -4,7 +4,7 @@ A Chrome extension that turns repetitive USPS tracking checks into a faster dash
 
 > **Not affiliated with or endorsed by the United States Postal Service.**
 
- [Releases]([⬇️ Download Latest Extension](https://github.com/vishalpankhade/USPS-TRACKING-UPDATER/releases/latest/download/usps-bulk-tracker-v2.7.1.zip)) · [Report a bug](../../issues)
+[**⬇️ Download Latest Extension**](https://github.com/YOUR-USERNAME/YOUR-REPO/releases/latest/download/usps-bulk-tracker-v2.9.0.zip) · [Releases](https://github.com/YOUR-USERNAME/YOUR-REPO/releases) · [Report a bug](../../issues)
 
 ## What it does
 
@@ -20,10 +20,7 @@ Paste as many USPS tracking numbers as you have, or fetch them directly from Goo
 - **Not Loaded** — the USPS page for a whole batch failed to load/read after the normal automatic retry. These batches are kept in a separate retry queue.
 - **Needs Review** — the parser cannot confidently recognize the USPS response. This is intentionally a safety-net category.
 
-## Safe retry behavior in v2.7.1
-
-The extension keeps the dashboard focused while USPS batch tabs run in the background. USPS processing tabs no longer steal focus from the dashboard.
-- USPS processing runs in background tabs so the dashboard stays visible.
+## Safe retry behavior in v2.9.0
 
 This release deliberately keeps the v2.4 timing flow rather than introducing a 45-second initial wait or several automatic retries.
 
@@ -126,3 +123,10 @@ The extension depends on the current USPS tracking webpage structure. USPS may c
 ## License
 
 MIT. See [LICENSE.txt](LICENSE.txt).
+
+## v2.9.0 additions
+
+- Alert classification now treats any USPS tracking detail containing the word `Alert` as an alert, including dash/em-dash variants and Missing Mail Search Request notices.
+- USPS Awaiting Item / Shipping Label Created messages are classified as Awaiting USPS.
+- After a check, you can paste additional tracking numbers into the same input and use **Check newly pasted numbers** to check only numbers not already in the results. Existing results are preserved and updated by tracking number.
+- Tracking format labels are kept out of individual result cards; format remains available as a filter.

@@ -61,20 +61,47 @@ function normalize(raw) {
 }
 
 function formatForTracking(tracking) {
-  const n = String(tracking || '').replace(/\D/g, '');
-  if (/^\d+$/.test(String(tracking || '')) && n.length >= 22 && n.length <= 34) return 'impb';
-  if (isTrackingLike(tracking)) return 'standard';
-  return 'other';
+  const n = cleanCandidate(tracking);
+  if (/^[0-9]{22,34}$/.test(n)) return 'long_numeric';
+  if (/^[A-Z]{2}\d{9}[A-Z]{2}$/.test(n)) return 'international';
+  return isTrackingLike(n) ? 'standard' : 'other';
 }
 
 function formatLabel(format) {
-  if (format === 'impb') return 'IMpb / Long';
-  if (format === 'standard') return 'Standard / International';
+  if (format === 'long_numeric') return 'Long numeric';
+  if (format === 'international') return 'International';
+  if (format === 'standard') return 'Standard';
   return 'Other';
 }
 
 function countInput() {
-  $('countLabel').textContent = `${normalize($('trackingInput').value).length.toLocaleString()} tracking numbers`;
+  const nums = normalize($('trackingInput').value);
+  $('countLabel').textContent = `${nums.length.toLocaleString()} tracking numbers`;
+  updateNewNumbersButton(nums);
+}
+
+function knownTrackingSet() {
+  return new Set(allResults.map(r => r.tracking));
+}
+
+function getNewPastedNumbers(nums = normalize($('trackingInput').value)) {
+  const known = knownTrackingSet();
+  return nums.filter(n => !known.has(n));
+}
+
+function updateNewNumbersButton(nums = normalize($('trackingInput').value)) {
+  const btn = $('checkNewBtn');
+  if (!btn) return;
+  const newNums = getNewPastedNumbers(nums);
+  btn.textContent = `Check newly pasted numbers (${newNums.length.toLocaleString()})`;
+  // This action is only useful after at least one result already exists. Before the first run,
+  // the normal "Check pasted numbers" button is the correct action.
+  btn.classList.toggle('hidden', allResults.length === 0 || newNums.length === 0 || activeJobPaused || !!currentJobRunning());
+}
+
+function currentJobRunning() {
+  const el = $('stopBtn');
+  return el && !el.disabled;
 }
 
 function esc(s) {
@@ -98,6 +125,7 @@ function updateProgress(job) {
   $('stopBtn').textContent = job.paused ? 'Resume' : 'Stop';
   $('startBtn').disabled = !job.done;
   $('sheetCheckBtn').disabled = !job.done;
+  updateNewNumbersButton();
 }
 
 function makeFilters(counts) {
@@ -119,12 +147,14 @@ function makeFormatFilters() {
   const wrap = $('formatFilters');
   if (!wrap) return;
   const total = allResults.length;
-  const impb = allResults.filter(r => formatForTracking(r.tracking) === 'impb').length;
+  const longNumeric = allResults.filter(r => formatForTracking(r.tracking) === 'long_numeric').length;
+  const international = allResults.filter(r => formatForTracking(r.tracking) === 'international').length;
   const standard = allResults.filter(r => formatForTracking(r.tracking) === 'standard').length;
   const items = [
     ['all', `All formats ${total}`],
-    ['standard', `Standard / Intl ${standard}`],
-    ['impb', `IMpb / Long ${impb}`]
+    ['standard', `Standard ${standard}`],
+    ['international', `International ${international}`],
+    ['long_numeric', `Long numeric ${longNumeric}`]
   ];
   wrap.innerHTML = '';
   items.forEach(([value, text]) => {
@@ -132,10 +162,12 @@ function makeFormatFilters() {
     b.type = 'button';
     b.className = 'format-filter' + (formatFilter === value ? ' active' : '');
     b.textContent = text;
+    b.title = value === 'long_numeric' ? 'Long numeric package identifiers; length alone does not prove a tracking number is IMpb.' : '';
     b.onclick = () => { formatFilter = value; render(); };
     wrap.appendChild(b);
   });
 }
+
 
 function categoryCounts() {
   const counts = { all: allResults.length, pending: 0, delivered: 0, alert: 0, awaiting: 0, not_available: 0, not_loaded: 0, error: 0 };
@@ -219,10 +251,18 @@ function render() {
   renderSummary(counts);
   makeFilters(counts);
   makeFormatFilters();
-  $('retryReviewBtn').classList.toggle('hidden', counts.error === 0);
   $('recheckActiveBtn').classList.toggle('hidden', counts.all === 0 || counts.all === counts.delivered);
-  if (counts.error > 0) $('retryReviewBtn').textContent = `Retry Needs Review (${counts.error})`;
+  const retryable = new Set(['pending','alert','awaiting','not_available','not_loaded','error']);
+  const retryCount = counts[filter] || 0;
+  const retryBtn = $('retryCurrentBtn');
+  if (retryBtn) {
+    const show = filter !== 'all' && retryable.has(filter) && retryCount > 0;
+    retryBtn.classList.toggle('hidden', !show);
+    const retryLabels = { pending:'not delivered', alert:'alerts', awaiting:'awaiting USPS', not_available:'tracking not available', not_loaded:'not loaded', error:'needs review' };
+    if (show) retryBtn.textContent = `Retry ${retryLabels[filter]} (${retryCount})`;
+  }
   $('recheckActiveBtn').textContent = `Recheck non-delivered (${Math.max(0, counts.all - counts.delivered)})`;
+  updateNewNumbersButton();
 
   const shown = filteredResults();
   $('shownCount').textContent = `${shown.length.toLocaleString()} shown`;
@@ -238,11 +278,10 @@ function render() {
     const el = document.createElement('article');
     el.className = 'result';
     const url = getUrl(r.tracking);
-    const fmt = formatForTracking(r.tracking);
     el.innerHTML = `
       <div class="result-top">
         <div class="tracking">${esc(r.tracking)}</div>
-        <div class="result-badges"><span class="format-badge ${fmt}">${esc(formatLabel(fmt))}</span><span class="badge ${esc(r.category)}">${esc(categoryText(r.category))}</span></div>
+        <div class="result-badges"><span class="badge ${esc(r.category)}">${esc(categoryText(r.category))}</span></div>
       </div>
       <div class="short-status"><strong>${esc(shortStatus(r))}</strong></div>
       <div class="status">${esc(r.status || 'No readable USPS status was detected.')}</div>
@@ -307,13 +346,16 @@ async function recheckActive() {
   toast(`Rechecking ${nums.length.toLocaleString()} non-delivered tracking number(s)…`);
 }
 
-async function retryReview() {
-  const nums = allResults.filter(r => r.category === 'error').map(r => r.tracking);
+async function retryCurrentSection() {
+  const retryable = new Set(['pending','alert','awaiting','not_available','not_loaded','error']);
+  if (!retryable.has(filter)) return;
+  const nums = allResults.filter(r => r.category === filter).map(r => r.tracking);
   if (!nums.length) return;
   $('startBtn').disabled = true;
   $('stopBtn').disabled = false;
   await chrome.runtime.sendMessage({ type: 'retry', trackingNumbers: nums, trackBatchFailures: true });
-  toast(`Retrying ${nums.length.toLocaleString()} Needs Review result(s)…`);
+  const labels = { pending:'not delivered', alert:'alerts', awaiting:'awaiting USPS', not_available:'tracking not available', not_loaded:'not loaded', error:'needs review' };
+  toast(`Retrying ${nums.length.toLocaleString()} ${labels[filter]} result(s)…`);
 }
 
 async function beginCheck(nums) {
@@ -339,6 +381,20 @@ async function startTracking() {
   }
   sheetWorkflowActive = false;
   await beginCheck(nums);
+}
+
+async function checkNewlyPasted() {
+  const newNums = getNewPastedNumbers();
+  if (!newNums.length) { toast('There are no newly pasted tracking numbers to check.'); return; }
+  $('checkNewBtn').disabled = true;
+  $('startBtn').disabled = true;
+  $('sheetCheckBtn').disabled = true;
+  $('stopBtn').disabled = false;
+  activeJobPaused = false;
+  formatFilter = 'all';
+  filter = 'all';
+  await chrome.runtime.sendMessage({ type: 'retry', trackingNumbers: newNums, trackBatchFailures: true });
+  toast(`Checking ${newNums.length.toLocaleString()} newly pasted tracking number(s)…`);
 }
 
 async function clearAll() {
@@ -544,6 +600,7 @@ async function startFromSheet() {
 
 $('trackingInput').addEventListener('input', countInput);
 $('startBtn').addEventListener('click', startTracking);
+$('checkNewBtn').addEventListener('click', checkNewlyPasted);
 $('sheetCheckBtn').addEventListener('click', startFromSheet);
 $('autoSync').addEventListener('change', saveSheetsConfig);
 $('themeBtn').addEventListener('click', toggleTheme);
@@ -570,7 +627,7 @@ $('stopBtn').addEventListener('click', async () => {
 $('clearBtn').addEventListener('click', clearAll);
 $('copyUndelivered').addEventListener('click', () => copyRows(allResults.filter(r => r.category !== 'delivered'), 'not delivered'));
 $('copyAll').addEventListener('click', () => copyRows(allResults, 'all'));
-$('retryReviewBtn').addEventListener('click', retryReview);
+$('retryCurrentBtn').addEventListener('click', retryCurrentSection);
 $('recheckActiveBtn').addEventListener('click', recheckActive);
 $('retryFailedBatchesBtn').addEventListener('click', retryAllFailedBatches);
 $('downloadCsv').addEventListener('click', () => {
@@ -608,6 +665,7 @@ chrome.runtime.onMessage.addListener(msg => {
     $('sheetCheckBtn').disabled = true;
     $('stopBtn').disabled = false;
     $('stopBtn').textContent = 'Resume';
+    updateNewNumbersButton();
   }
   if (msg.type === 'done') {
     updateProgress(msg.job);
@@ -615,6 +673,7 @@ chrome.runtime.onMessage.addListener(msg => {
     $('sheetCheckBtn').disabled = false;
     $('stopBtn').disabled = true;
     $('stopBtn').textContent = 'Stop';
+    updateNewNumbersButton();
     if (sheetWorkflowActive && sheetsConfig.autoSync && allResults.length) {
       syncResultsToSheet(allResults, true).catch(e => { $('syncStatus').textContent = `Final sync failed: ${e.message}`; });
     }
